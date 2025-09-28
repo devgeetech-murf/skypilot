@@ -172,6 +172,9 @@ Below is the configuration syntax and some example values. See detailed explanat
     :ref:`tenant_id <config-yaml-nebius-tenant-id>`: tenant-1234567890
     :ref:`domain <config-yaml-nebius-domain>`: api.nebius.cloud:443
 
+  :ref:`vast <config-yaml-vast>`:
+    :ref:`secure_cloud_only <config-yaml-vast-secure-cloud-only>`: false
+
   :ref:`rbac <config-yaml-rbac>`:
     :ref:`default_role <config-yaml-rbac-default-role>`: admin
 
@@ -1494,6 +1497,33 @@ Example:
 
   nebius:
     domain: api.nebius.cloud:443
+
+.. _config-yaml-vast:
+
+``vast``
+~~~~~~~~
+
+Advanced Vast.ai configuration (optional).
+
+.. _config-yaml-vast-secure-cloud-only:
+
+``vast.secure_cloud_only``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Use only secure cloud instances (optional).
+
+Set to ``true`` to restrict SkyPilot to use only secure cloud instances on Vast.ai.
+When enabled, SkyPilot will only provision instances that meet Vast.ai's secure cloud criteria,
+which typically includes additional security and reliability guarantees.
+
+Default: ``false``.
+
+Example:
+
+.. code-block:: yaml
+
+  vast:
+    secure_cloud_only: true
 
 
 .. _config-yaml-rbac:

@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky.adaptors import vast
+from sky.adaptors.vast import get_secure_cloud_only
 
 logger = sky_logging.init_logger(__name__)
 
@@ -95,6 +96,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
         f'num_gpus={num_gpus}',
         f'gpu_name="{gpu_name}"',
         f'cpu_ram>="{cpu_ram}"',
+        f'datacenter={get_secure_cloud_only()}',
     ])
 
     instance_list = vast.vast().search_offers(query=query)

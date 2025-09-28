@@ -14,6 +14,7 @@ import re
 from typing import Any, Dict, List
 
 from sky.adaptors import vast
+from sky.adaptors.vast import get_secure_cloud_only
 
 _map = {
     'TeslaV100': 'V100',
@@ -79,10 +80,13 @@ if __name__ == '__main__':
     #     in order to ensure that machines with
     #     small disk pools aren't listed
     #
-    offerList = vast.vast().search_offers(
-        query=('georegion = true chunked = true '
-               'inet_down >= 100 disk_space >= 80'),
-        limit=10000)
+    if get_secure_cloud_only():
+        query = ('georegion = true chunked = true '
+                 'inet_down >= 100 disk_space >= 80 datacenter=True')
+    else:
+        query = ('georegion = true chunked = true '
+                 'inet_down >= 100 disk_space >= 80')
+    offerList = vast.vast().search_offers(query=query, limit=10000)
 
     priceMap: Dict[str, List] = collections.defaultdict(list)
     for offer in offerList:

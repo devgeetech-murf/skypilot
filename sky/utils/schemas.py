@@ -1459,6 +1459,15 @@ def get_config_schema():
                     }
                 }
             },
+        },
+        'vast': {
+            'type': 'object',
+            'required': [],
+            'properties': {
+                'secure_cloud_only': {
+                    'type': 'boolean'
+                }
+            }
         }
     }
 
