@@ -10,7 +10,8 @@ import sqlite3
 import threading
 import time
 import typing
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple, Union
+from typing import (Any, Awaitable, Callable, Dict, List, Optional, Set, Tuple,
+                    Union)
 import urllib.parse
 
 import colorama
@@ -277,6 +278,27 @@ def _init_db(func):
         raise last_exc
 
     return wrapper
+
+
+async def _describe_task_transition_failure(session: sql_async.AsyncSession,
+                                            job_id: int, task_id: int) -> str:
+    """Return a human-readable description when a task transition fails."""
+    details = 'Couldn\'t fetch the task details.'
+    try:
+        debug_result = await session.execute(
+            sqlalchemy.select(spot_table.c.status, spot_table.c.end_at).where(
+                sqlalchemy.and_(spot_table.c.spot_job_id == job_id,
+                                spot_table.c.task_id == task_id)))
+        rows = debug_result.mappings().all()
+        details = (f'{len(rows)} rows matched job {job_id} and task '
+                   f'{task_id}.')
+        for row in rows:
+            status = row['status']
+            end_at = row['end_at']
+            details += f' Status: {status}, End time: {end_at}.'
+    except Exception as exc:  # pylint: disable=broad-except
+        details += f' Error fetching task details: {exc}'
+    return details
 
 
 # job_duration is the time a job actually runs (including the
@@ -757,9 +779,12 @@ async def set_backoff_pending_async(job_id: int, task_id: int):
         count = result.rowcount
         await session.commit()
         if count != 1:
-            raise exceptions.ManagedJobStatusError(
-                'Failed to set the task back to pending. '
-                f'({count} rows updated)')
+            details = await _describe_task_transition_failure(
+                session, job_id, task_id)
+            message = ('Failed to set the task back to pending. '
+                       f'({count} rows updated. {details})')
+            logger.error(message)
+            raise exceptions.ManagedJobStatusError(message)
     # Do not call callback_func here, as we don't use the callback for PENDING.
 
 
@@ -788,9 +813,12 @@ async def set_restarting_async(job_id: int, task_id: int, recovering: bool):
         await session.commit()
         logger.debug(f'back to {target_status}')
         if count != 1:
-            raise exceptions.ManagedJobStatusError(
-                f'Failed to set the task back to {target_status}. '
-                f'({count} rows updated)')
+            details = await _describe_task_transition_failure(
+                session, job_id, task_id)
+            message = (f'Failed to set the task back to {target_status}. '
+                       f'({count} rows updated. {details})')
+            logger.error(message)
+            raise exceptions.ManagedJobStatusError(message)
     # Do not call callback_func here, as it should only be invoked for the
     # initial (pre-`set_backoff_pending`) transition to STARTING or RECOVERING.
 
@@ -1251,6 +1279,25 @@ def get_pool_from_job_id(job_id: int) -> Optional[str]:
 
 
 @_init_db
+def get_pool_and_submit_info_from_job_ids(
+    job_ids: Set[int]
+) -> Dict[int, Tuple[Optional[str], Optional[str], Optional[int]]]:
+    """Get the pool, cluster name, and job id on pool from job id"""
+    assert _SQLALCHEMY_ENGINE is not None
+    with orm.Session(_SQLALCHEMY_ENGINE) as session:
+        rows = session.execute(
+            sqlalchemy.select(
+                job_info_table.c.spot_job_id, job_info_table.c.pool,
+                job_info_table.c.current_cluster_name,
+                job_info_table.c.job_id_on_pool_cluster).where(
+                    job_info_table.c.spot_job_id.in_(job_ids))).fetchall()
+        return {
+            job_id: (pool, cluster_name, job_id_on_pool_cluster)
+            for job_id, pool, cluster_name, job_id_on_pool_cluster in rows
+        }
+
+
+@_init_db
 def set_current_cluster_name(job_id: int, current_cluster_name: str) -> None:
     """Set the current cluster name for a job."""
     assert _SQLALCHEMY_ENGINE is not None
@@ -1624,9 +1671,12 @@ async def set_starting_async(job_id: int, task_id: int, run_timestamp: str,
         count = result.rowcount
         await session.commit()
         if count != 1:
-            raise exceptions.ManagedJobStatusError(
-                'Failed to set the task to starting. '
-                f'({count} rows updated)')
+            details = await _describe_task_transition_failure(
+                session, job_id, task_id)
+            message = ('Failed to set the task to starting. '
+                       f'({count} rows updated. {details})')
+            logger.error(message)
+            raise exceptions.ManagedJobStatusError(message)
     await callback_func('SUBMITTED')
     await callback_func('STARTING')
 
@@ -1656,9 +1706,12 @@ async def set_started_async(job_id: int, task_id: int, start_time: float,
         count = result.rowcount
         await session.commit()
         if count != 1:
-            raise exceptions.ManagedJobStatusError(
-                f'Failed to set the task to started. '
-                f'({count} rows updated)')
+            details = await _describe_task_transition_failure(
+                session, job_id, task_id)
+            message = (f'Failed to set the task to started. '
+                       f'({count} rows updated. {details})')
+            logger.error(message)
+            raise exceptions.ManagedJobStatusError(message)
     await callback_func('STARTED')
 
 
@@ -1713,9 +1766,14 @@ async def set_recovering_async(job_id: int, task_id: int,
         count = result.rowcount
         await session.commit()
         if count != 1:
-            raise exceptions.ManagedJobStatusError(
-                f'Failed to set the task to recovering. '
-                f'({count} rows updated)')
+            details = await _describe_task_transition_failure(
+                session, job_id, task_id)
+            message = ('Failed to set the task to recovering with '
+                       'force_transit_to_recovering='
+                       f'{force_transit_to_recovering}. '
+                       f'({count} rows updated. {details})')
+            logger.error(message)
+            raise exceptions.ManagedJobStatusError(message)
     await callback_func('RECOVERING')
 
 
@@ -1741,9 +1799,12 @@ async def set_recovered_async(job_id: int, task_id: int, recovered_time: float,
         count = result.rowcount
         await session.commit()
         if count != 1:
-            raise exceptions.ManagedJobStatusError(
-                f'Failed to set the task to recovered. '
-                f'({count} rows updated)')
+            details = await _describe_task_transition_failure(
+                session, job_id, task_id)
+            message = (f'Failed to set the task to recovered. '
+                       f'({count} rows updated. {details})')
+            logger.error(message)
+            raise exceptions.ManagedJobStatusError(message)
     logger.info('==== Recovered. ====')
     await callback_func('RECOVERED')
 
@@ -1768,9 +1829,12 @@ async def set_succeeded_async(job_id: int, task_id: int, end_time: float,
         count = result.rowcount
         await session.commit()
         if count != 1:
-            raise exceptions.ManagedJobStatusError(
-                f'Failed to set the task to succeeded. '
-                f'({count} rows updated)')
+            details = await _describe_task_transition_failure(
+                session, job_id, task_id)
+            message = (f'Failed to set the task to succeeded. '
+                       f'({count} rows updated. {details})')
+            logger.error(message)
+            raise exceptions.ManagedJobStatusError(message)
     await callback_func('SUCCEEDED')
     logger.info('Job succeeded.')
 
